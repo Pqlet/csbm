@@ -11,8 +11,8 @@ from csbm.data import Prior
 import math
 import typing
 
-import flash_attn
-import flash_attn.layers.rotary
+# import flash_attn
+# import flash_attn.layers.rotary
 import huggingface_hub
 import omegaconf
 import torch
@@ -119,10 +119,10 @@ def rotate_half(x):
   return torch.cat((-x2, x1), dim=-1)
 
 
-def apply_rotary_pos_emb(qkv, cos, sin):
-  cos = cos[0,:,0,0,:cos.shape[-1]//2]
-  sin = sin[0,:,0,0,:sin.shape[-1]//2]
-  return flash_attn.layers.rotary.apply_rotary_emb_qkv_(qkv, cos, sin)
+# def apply_rotary_pos_emb(qkv, cos, sin):
+#   cos = cos[0,:,0,0,:cos.shape[-1]//2]
+#   sin = sin[0,:,0,0,:sin.shape[-1]//2]
+#   return flash_attn.layers.rotary.apply_rotary_emb_qkv_(qkv, cos, sin)
 
 
 # function overload
@@ -221,231 +221,231 @@ class LabelEmbedder(nn.Module):
 #################################################################################
 
 
-class DDiTBlock(nn.Module):
-  def __init__(self, dim, n_heads, cond_dim, mlp_ratio=4, dropout=0.1):
-    super().__init__()
-    self.n_heads = n_heads
+# class DDiTBlock(nn.Module):
+#   def __init__(self, dim, n_heads, cond_dim, mlp_ratio=4, dropout=0.1):
+#     super().__init__()
+#     self.n_heads = n_heads
 
-    self.norm1 = LayerNorm(dim)
-    self.attn_qkv = nn.Linear(dim, 3 * dim, bias=False)
-    self.attn_out = nn.Linear(dim, dim, bias=False)
-    self.dropout1 = nn.Dropout(dropout)
+#     self.norm1 = LayerNorm(dim)
+#     self.attn_qkv = nn.Linear(dim, 3 * dim, bias=False)
+#     self.attn_out = nn.Linear(dim, dim, bias=False)
+#     self.dropout1 = nn.Dropout(dropout)
 
-    self.norm2 = LayerNorm(dim)
-    self.mlp = nn.Sequential(
-      nn.Linear(dim, mlp_ratio * dim, bias=True),
-      nn.GELU(approximate='tanh'),
-      nn.Linear(mlp_ratio * dim, dim, bias=True))
-    self.dropout2 = nn.Dropout(dropout)
-    self.dropout = dropout
+#     self.norm2 = LayerNorm(dim)
+#     self.mlp = nn.Sequential(
+#       nn.Linear(dim, mlp_ratio * dim, bias=True),
+#       nn.GELU(approximate='tanh'),
+#       nn.Linear(mlp_ratio * dim, dim, bias=True))
+#     self.dropout2 = nn.Dropout(dropout)
+#     self.dropout = dropout
 
-    self.adaLN_modulation = nn.Linear(cond_dim, 6 * dim, bias=True)
-    self.adaLN_modulation.weight.data.zero_()
-    self.adaLN_modulation.bias.data.zero_()
-
-
-  def _get_bias_dropout_scale(self):
-    if self.training:
-      return bias_dropout_add_scale_fused_train
-    else:
-      return bias_dropout_add_scale_fused_inference
+#     self.adaLN_modulation = nn.Linear(cond_dim, 6 * dim, bias=True)
+#     self.adaLN_modulation.weight.data.zero_()
+#     self.adaLN_modulation.bias.data.zero_()
 
 
-  def forward(self, x, rotary_cos_sin, c, seqlens=None):
-    batch_size, seq_len = x.shape[0], x.shape[1]
+#   def _get_bias_dropout_scale(self):
+#     if self.training:
+#       return bias_dropout_add_scale_fused_train
+#     else:
+#       return bias_dropout_add_scale_fused_inference
 
-    bias_dropout_scale_fn = self._get_bias_dropout_scale()
 
-    (shift_msa, scale_msa, gate_msa, shift_mlp,
-    scale_mlp, gate_mlp) = self.adaLN_modulation(c)[:, None].chunk(6, dim=2)
+#   def forward(self, x, rotary_cos_sin, c, seqlens=None):
+#     batch_size, seq_len = x.shape[0], x.shape[1]
 
-    # attention operation
-    x_skip = x
-    x = modulate_fused(self.norm1(x), shift_msa, scale_msa)
+#     bias_dropout_scale_fn = self._get_bias_dropout_scale()
 
-    qkv = self.attn_qkv(x)
-    qkv = rearrange(qkv,
-                    'b s (three h d) -> b s three h d',
-                    three=3,
-                    h=self.n_heads)
-    with torch.cuda.amp.autocast(enabled=False):
-      cos, sin = rotary_cos_sin
-      qkv = apply_rotary_pos_emb(
-        qkv, cos.to(qkv.dtype), sin.to(qkv.dtype))
-    qkv = rearrange(qkv, 'b s ... -> (b s) ...')
-    if seqlens is None:
-      cu_seqlens = torch.arange(
-        0, (batch_size + 1) * seq_len, step=seq_len,
-        dtype=torch.int32, device=qkv.device) # type: ignore
-    else:
-      cu_seqlens = seqlens.cumsum(-1)
-    x = flash_attn.flash_attn_interface.flash_attn_varlen_qkvpacked_func( # type: ignore
-      qkv, cu_seqlens, seq_len, 0., causal=False)
+#     (shift_msa, scale_msa, gate_msa, shift_mlp,
+#     scale_mlp, gate_mlp) = self.adaLN_modulation(c)[:, None].chunk(6, dim=2)
+
+#     # attention operation
+#     x_skip = x
+#     x = modulate_fused(self.norm1(x), shift_msa, scale_msa)
+
+#     qkv = self.attn_qkv(x)
+#     qkv = rearrange(qkv,
+#                     'b s (three h d) -> b s three h d',
+#                     three=3,
+#                     h=self.n_heads)
+#     with torch.cuda.amp.autocast(enabled=False):
+#       cos, sin = rotary_cos_sin
+#       qkv = apply_rotary_pos_emb(
+#         qkv, cos.to(qkv.dtype), sin.to(qkv.dtype))
+#     qkv = rearrange(qkv, 'b s ... -> (b s) ...')
+#     if seqlens is None:
+#       cu_seqlens = torch.arange(
+#         0, (batch_size + 1) * seq_len, step=seq_len,
+#         dtype=torch.int32, device=qkv.device) # type: ignore
+#     else:
+#       cu_seqlens = seqlens.cumsum(-1)
+#     x = flash_attn.flash_attn_interface.flash_attn_varlen_qkvpacked_func( # type: ignore
+#       qkv, cu_seqlens, seq_len, 0., causal=False)
     
-    x = rearrange(x, '(b s) h d -> b s (h d)', b=batch_size)
+#     x = rearrange(x, '(b s) h d -> b s (h d)', b=batch_size)
 
-    x = bias_dropout_scale_fn(self.attn_out(x),
-                              None,
-                              gate_msa,
-                              x_skip,
-                              self.dropout)
+#     x = bias_dropout_scale_fn(self.attn_out(x),
+#                               None,
+#                               gate_msa,
+#                               x_skip,
+#                               self.dropout)
 
-    # mlp operation
-    x = bias_dropout_scale_fn(
-      self.mlp(modulate_fused(
-        self.norm2(x), shift_mlp, scale_mlp)),
-      None, gate_mlp, x, self.dropout)
-    return x
+#     # mlp operation
+#     x = bias_dropout_scale_fn(
+#       self.mlp(modulate_fused(
+#         self.norm2(x), shift_mlp, scale_mlp)),
+#       None, gate_mlp, x, self.dropout)
+#     return x
 
 
 
-class EmbeddingLayer(nn.Module):
-  def __init__(self, dim, vocab_dim):
-    super().__init__()
-    self.embedding = nn.Parameter(torch.empty((vocab_dim, dim)))
-    torch.nn.init.kaiming_uniform_(self.embedding, a=math.sqrt(5))
+# class EmbeddingLayer(nn.Module):
+#   def __init__(self, dim, vocab_dim):
+#     super().__init__()
+#     self.embedding = nn.Parameter(torch.empty((vocab_dim, dim)))
+#     torch.nn.init.kaiming_uniform_(self.embedding, a=math.sqrt(5))
 
-  def forward_differentiable(self, x):
-    return x @ self.embedding
+#   def forward_differentiable(self, x):
+#     return x @ self.embedding
   
-  def forward(self, x):
-    return self.embedding[x]
+#   def forward(self, x):
+#     return self.embedding[x]
 
 
-class DDitFinalLayer(nn.Module):
-  def __init__(self, hidden_size, out_channels, cond_dim):
-    super().__init__()
-    self.norm_final = LayerNorm(hidden_size)
-    self.linear = nn.Linear(hidden_size, out_channels)
-    self.linear.weight.data.zero_()
-    self.linear.bias.data.zero_()
+# class DDitFinalLayer(nn.Module):
+#   def __init__(self, hidden_size, out_channels, cond_dim):
+#     super().__init__()
+#     self.norm_final = LayerNorm(hidden_size)
+#     self.linear = nn.Linear(hidden_size, out_channels)
+#     self.linear.weight.data.zero_()
+#     self.linear.bias.data.zero_()
 
-    self.adaLN_modulation = nn.Linear(cond_dim,
-                                      2 * hidden_size,
-                                      bias=True)
-    self.adaLN_modulation.weight.data.zero_()
-    self.adaLN_modulation.bias.data.zero_()
-
-
-  def forward(self, x, c):
-    shift, scale = self.adaLN_modulation(c)[:, None].chunk(2, dim=2)
-    x = modulate_fused(self.norm_final(x), shift, scale)
-    x = self.linear(x)
-    return x
+#     self.adaLN_modulation = nn.Linear(cond_dim,
+#                                       2 * hidden_size,
+#                                       bias=True)
+#     self.adaLN_modulation.weight.data.zero_()
+#     self.adaLN_modulation.bias.data.zero_()
 
 
-class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
-  def __init__(self, config, vocab_size: int):
-    super().__init__()
-    if type(config) == dict:
-      config = omegaconf.OmegaConf.create(config)
-
-    self.config = config
-    self.vocab_size = vocab_size
-
-    self.vocab_embed = EmbeddingLayer(config.hidden_size,
-                                      vocab_size)
-    self.sigma_map = TimestepEmbedder(config.cond_dim)
-    self.rotary_emb = Rotary(
-      config.hidden_size // config.n_heads)
-
-    blocks = []
-    for _ in range(config.n_blocks):
-      blocks.append(DDiTBlock(config.hidden_size,
-                              config.n_heads,
-                              config.cond_dim,
-                              dropout=config.dropout))
-    self.blocks = nn.ModuleList(blocks)
-
-    self.output_layer = DDitFinalLayer(
-      config.hidden_size,
-      vocab_size,
-      config.cond_dim)
-    self.scale_by_sigma = config.scale_by_sigma
-
-  def _get_bias_dropout_scale(self):
-    if self.training:
-      return bias_dropout_add_scale_fused_train
-    else:
-      return  bias_dropout_add_scale_fused_inference
-
-  def forward(self, indices, sigma):
-
-    if len(indices.squeeze().shape) > 2:
-      x = self.vocab_embed.forward_differentiable(indices)
-    else:
-      x = self.vocab_embed(indices)
-
-    c = F.silu(self.sigma_map(sigma))
-
-    rotary_cos_sin = self.rotary_emb(x)
-
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-      for i in range(len(self.blocks)):
-        x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
-      x = self.output_layer(x, c)
-
-    return x
+#   def forward(self, x, c):
+#     shift, scale = self.adaLN_modulation(c)[:, None].chunk(2, dim=2)
+#     x = modulate_fused(self.norm_final(x), shift, scale)
+#     x = self.linear(x)
+#     return x
 
 
-class TextD3PM(nn.Module):
-    def __init__(
-        self, 
-        input_dim: int = 128,
-        num_categories: int = 8096,
-        num_timesteps: int = 100, 
-        config: Optional[omegaconf.DictConfig] = None,
-    ) -> None:
-        super().__init__()
-        self.model = DIT(config, num_categories)
-        self.input_dim = input_dim
-        self.num_categories = num_categories
-        self.num_timesteps = num_timesteps
+# class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
+#   def __init__(self, config, vocab_size: int):
+#     super().__init__()
+#     if type(config) == dict:
+#       config = omegaconf.OmegaConf.create(config)
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        # x_one_hot = F.one_hot(x, self.num_categories) 
-        # mean = (self.num_categories - 1) / 2
-        # x = x / mean - 1
-        return self.model(x, t) # + x_one_hot # type: ignore
+#     self.config = config
+#     self.vocab_size = vocab_size
 
-    def markov_sample(self, x: torch.Tensor, t: torch.Tensor, prior: Prior):
-        r"""Samples from $p(x_{t-1} | x_{t}, \hat{x_{0}})$, where $\hat{x_{0}} \sim m_{\theta}(\hat{x_{0}} | x_{t})$."""
-        first_step = (t == 1).long().view((x.shape[0], *[1] * (x.dim() - 1)))
+#     self.vocab_embed = EmbeddingLayer(config.hidden_size,
+#                                       vocab_size)
+#     self.sigma_map = TimestepEmbedder(config.cond_dim)
+#     self.rotary_emb = Rotary(
+#       config.hidden_size // config.n_heads)
+
+#     blocks = []
+#     for _ in range(config.n_blocks):
+#       blocks.append(DDiTBlock(config.hidden_size,
+#                               config.n_heads,
+#                               config.cond_dim,
+#                               dropout=config.dropout))
+#     self.blocks = nn.ModuleList(blocks)
+
+#     self.output_layer = DDitFinalLayer(
+#       config.hidden_size,
+#       vocab_size,
+#       config.cond_dim)
+#     self.scale_by_sigma = config.scale_by_sigma
+
+#   def _get_bias_dropout_scale(self):
+#     if self.training:
+#       return bias_dropout_add_scale_fused_train
+#     else:
+#       return  bias_dropout_add_scale_fused_inference
+
+#   def forward(self, indices, sigma):
+
+#     if len(indices.squeeze().shape) > 2:
+#       x = self.vocab_embed.forward_differentiable(indices)
+#     else:
+#       x = self.vocab_embed(indices)
+
+#     c = F.silu(self.sigma_map(sigma))
+
+#     rotary_cos_sin = self.rotary_emb(x)
+
+#     with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+#       for i in range(len(self.blocks)):
+#         x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
+#       x = self.output_layer(x, c)
+
+#     return x
+
+
+# class TextD3PM(nn.Module):
+#     def __init__(
+#         self, 
+#         input_dim: int = 128,
+#         num_categories: int = 8096,
+#         num_timesteps: int = 100, 
+#         config: Optional[omegaconf.DictConfig] = None,
+#     ) -> None:
+#         super().__init__()
+#         self.model = DIT(config, num_categories)
+#         self.input_dim = input_dim
+#         self.num_categories = num_categories
+#         self.num_timesteps = num_timesteps
+
+#     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+#         # x_one_hot = F.one_hot(x, self.num_categories) 
+#         # mean = (self.num_categories - 1) / 2
+#         # x = x / mean - 1
+#         return self.model(x, t) # + x_one_hot # type: ignore
+
+#     def markov_sample(self, x: torch.Tensor, t: torch.Tensor, prior: Prior):
+#         r"""Samples from $p(x_{t-1} | x_{t}, \hat{x_{0}})$, where $\hat{x_{0}} \sim m_{\theta}(\hat{x_{0}} | x_{t})$."""
+#         first_step = (t == 1).long().view((x.shape[0], *[1] * (x.dim() - 1)))
         
-        pred_x_start_logits = self(x, t)
-        pred_q_posterior_logits = prior.posterior_logits(pred_x_start_logits, x, t, logits=True)
-        noise = torch.rand_like(pred_q_posterior_logits)
-        noise = torch.clamp(noise, min=torch.finfo(noise.dtype).tiny, max=1.)
-        gumbel_noise = -torch.log(-torch.log(noise))
-        random_samples = torch.argmax(pred_q_posterior_logits + gumbel_noise, dim=-1)
-        # probs = pred_q_posterior_logits.softmax(dim=-1).view(-1, self.num_categories)
-        # random_samples = probs.multinomial(num_samples=1).view(x.shape)
+#         pred_x_start_logits = self(x, t)
+#         pred_q_posterior_logits = prior.posterior_logits(pred_x_start_logits, x, t, logits=True)
+#         noise = torch.rand_like(pred_q_posterior_logits)
+#         noise = torch.clamp(noise, min=torch.finfo(noise.dtype).tiny, max=1.)
+#         gumbel_noise = -torch.log(-torch.log(noise))
+#         random_samples = torch.argmax(pred_q_posterior_logits + gumbel_noise, dim=-1)
+#         # probs = pred_q_posterior_logits.softmax(dim=-1).view(-1, self.num_categories)
+#         # random_samples = probs.multinomial(num_samples=1).view(x.shape)
         
-        # No noise when t == 1
-        # NOTE: for t=1 this just "samples" from the argmax
-        #   as opposed to "sampling" from the mean in the gaussian case.
+#         # No noise when t == 1
+#         # NOTE: for t=1 this just "samples" from the argmax
+#         #   as opposed to "sampling" from the mean in the gaussian case.
 
-        argmax_samples = pred_q_posterior_logits.argmax(dim=-1)
-        samples = first_step * argmax_samples + (1 - first_step) * random_samples
-        return samples
+#         argmax_samples = pred_q_posterior_logits.argmax(dim=-1)
+#         samples = first_step * argmax_samples + (1 - first_step) * random_samples
+#         return samples
         
-    @torch.no_grad()
-    def sample(self, x: torch.Tensor, prior: Prior) -> torch.Tensor:
-        for t in reversed(range(1, self.num_timesteps + 2)):
-            t = torch.tensor([t] * x.shape[0], device=self.device)
-            x = self.markov_sample(x, t, prior)
-        return x
+#     @torch.no_grad()
+#     def sample(self, x: torch.Tensor, prior: Prior) -> torch.Tensor:
+#         for t in reversed(range(1, self.num_timesteps + 2)):
+#             t = torch.tensor([t] * x.shape[0], device=self.device)
+#             x = self.markov_sample(x, t, prior)
+#         return x
     
-    @torch.no_grad()
-    def sample_trajectory(self, x: torch.Tensor, prior: Prior) -> torch.Tensor:
-        trajectory = [x]
-        for t in reversed(range(1, self.num_timesteps + 2)):
-            t = torch.tensor([t] * x.shape[0], device=self.device)
-            x = self.markov_sample(x, t, prior)
-            trajectory.append(x)
-        trajectory = torch.stack(trajectory, dim=0)
-        return trajectory
+#     @torch.no_grad()
+#     def sample_trajectory(self, x: torch.Tensor, prior: Prior) -> torch.Tensor:
+#         trajectory = [x]
+#         for t in reversed(range(1, self.num_timesteps + 2)):
+#             t = torch.tensor([t] * x.shape[0], device=self.device)
+#             x = self.markov_sample(x, t, prior)
+#             trajectory.append(x)
+#         trajectory = torch.stack(trajectory, dim=0)
+#         return trajectory
     
-    @property
-    def device(self):
-        return next(self.parameters()).device
+#     @property
+#     def device(self):
+#         return next(self.parameters()).device

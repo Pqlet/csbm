@@ -140,7 +140,8 @@ if __name__ == '__main__':
     elif args.data.type == 'quantized_images':
         model_class = LatentD3PM
     elif args.data.type == 'texts':
-        model_class = TextD3PM
+        raise NotImplementedError("Texts are not supported yet!")
+        # model_class = TextD3PM
     else:
         raise NotImplementedError(f"Unknown exp type {args.data.type}!")
     

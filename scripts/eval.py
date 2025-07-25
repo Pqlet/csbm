@@ -24,7 +24,7 @@ from csbm.data import (
 )
 from csbm.models.images import ImageD3PM
 from csbm.models.quantized_images import Codec, LatentD3PM
-from csbm.models.texts import TextD3PM
+# from csbm.models.texts import TextD3PM
 from csbm.trainer import СSBMTrainer
 from csbm.utils import ConsoleTracker
 

@@ -18,13 +18,14 @@ from transformers import PreTrainedTokenizerFast
 from csbm.models.quantized_images import LatentD3PM, Codec
 from csbm.models.toy import D3PM
 from csbm.models.images import ImageD3PM
-from csbm.models.texts import TextD3PM
+# from csbm.models.texts import TextD3PM
 
 from csbm.data import BaseDataset, CouplingDataset, Prior
 from csbm.metrics import FID, CMMD, GenerativeNLL, ClassifierAccuracy
 from csbm.metrics import MSE, LPIPS, HammingDistance, EditDistance, BLEUScore
 from csbm.utils import visualize, visualize_trajectory
 from csbm.vq_diffusion.engine.lr_scheduler import ReduceLROnPlateauWithWarmup
+
 
 
 class СSBMTrainer:
@@ -40,8 +41,10 @@ class СSBMTrainer:
         prior_iterations: int,
         use_mini_batch: bool,
         accelerator: Accelerator,
-        forward_model: Union[D3PM, ImageD3PM, LatentD3PM, TextD3PM],
-        backward_model: Optional[Union[D3PM, ImageD3PM, LatentD3PM, TextD3PM]],
+        # forward_model: Union[D3PM, ImageD3PM, LatentD3PM, TextD3PM],
+        # backward_model: Optional[Union[D3PM, ImageD3PM, LatentD3PM, TextD3PM]],
+        forward_model: Union[D3PM, ImageD3PM, LatentD3PM],
+        backward_model: Optional[Union[D3PM, ImageD3PM, LatentD3PM]],
         prior: Prior,
         forward_optimizer: Optional[Optimizer],
         backward_optimizer: Optional[Optimizer],
@@ -59,6 +62,7 @@ class СSBMTrainer:
         eval_freq: int = 1000,
         num_trajectories: int = 4,
         num_translations: int = 5,
+        save_freq: int = 10000,
     ) -> None:
         assert kl_loss_coeff > 0 or ce_loss_coeff > 0 or mse_loss_coeff > 0, 'At least one loss coefficents must be greater than zero!'
 
@@ -158,6 +162,8 @@ class СSBMTrainer:
         self.num_trajectories = num_trajectories
         self.num_translations = num_translations
 
+        self.save_freq = save_freq
+
     def kl_loss(
         self, 
         true_q_posterior_logits: Any, 
@@ -211,14 +217,25 @@ class СSBMTrainer:
                         i, j = self._sample_map(pi, true_x_start.shape[0])
                         true_x_start, true_x_end = true_x_start[i], true_x_end[j]
                 else:
-                    true_x_start, true_x_end = batch, self.models[bf].sample(batch, self.prior)
+                    if hasattr(self.models[bf], "module"):
+                        true_x_start, true_x_end = batch, self.models[bf].module.sample(batch, self.prior)
+                    else:
+                        true_x_start, true_x_end = batch, self.models[bf].sample(batch, self.prior)
 
-                t = torch.randint(
-                    low=1, 
-                    high=self.models[fb].num_timesteps + 2,
-                    size=(true_x_start.shape[0],), 
-                    device=self.accelerator.device
-                )
+                if hasattr(self.models[fb], "module"):
+                    t = torch.randint(
+                        low=1, 
+                        high=self.models[fb].module.num_timesteps + 2,
+                        size=(true_x_start.shape[0],), 
+                        device=self.accelerator.device
+                    )
+                else:
+                    t = torch.randint(
+                        low=1, 
+                        high=self.models[fb].num_timesteps + 2,
+                        size=(true_x_start.shape[0],), 
+                        device=self.accelerator.device
+                    )
                 x_t = self.prior.sample_bridge(true_x_start, true_x_end, t) # type: ignore
 
                 loss = 0
@@ -257,6 +274,11 @@ class СSBMTrainer:
                 self.viz(fb=fb, dataloader=testloader, step=self.step)
                 if self.exp_type != 'toy':
                     self.eval(fb=fb, dataloader=testloader, step=self.step)
+            if self.step % self.save_freq == 0:
+                self.accelerator.save_model(
+                    self.models[fb], 
+                    os.path.join(self.checkpoint_path, f'{fb}_{self.iteration}_{self.step}')
+                )
             self.accelerator.log(info, step=self.step)
         
     def viz(
@@ -271,10 +293,16 @@ class СSBMTrainer:
 
             if self.codec is not None:
                 encoded_test_x_end = self.codec.encode_to_cats(test_x_end)
-                pred_x_start = self.models[fb].sample(encoded_test_x_end, self.prior)
+                if hasattr(self.models[fb], "module"):
+                    pred_x_start = self.models[fb].module.sample(encoded_test_x_end, self.prior)
+                else:
+                    pred_x_start = self.models[fb].sample(encoded_test_x_end, self.prior)
                 pred_x_start = self.codec.decode_to_image(pred_x_start)
             else:
-                pred_x_start = self.models[fb].sample(test_x_end, self.prior)
+                if hasattr(self.models[fb], "module"):
+                    pred_x_start = self.models[fb].module.sample(test_x_end, self.prior)
+                else:
+                    pred_x_start = self.models[fb].sample(test_x_end, self.prior)
 
             if self.exp_type == 'texts' and self.tokenizer is not None:
                 test_x_end = self.tokenizer.batch_decode(test_x_end.cpu(), skip_special_tokens=True)
@@ -305,7 +333,11 @@ class СSBMTrainer:
             trajectories = traj_start.unsqueeze(0).repeat(*repeats)
             trajectories = trajectories.reshape(-1, *traj_start.shape[1:])
             trajectories = trajectories.to(self.accelerator.device)
-            trajectories = self.models[fb].sample_trajectory(trajectories, self.prior)
+
+            if hasattr(self.models[fb], "module"):
+                trajectories = self.models[fb].module.sample_trajectory(trajectories, self.prior)
+            else:
+                trajectories = self.models[fb].sample_trajectory(trajectories, self.prior)
 
             # Repeating since for quantized images are decoded from latent space but we want original images
             test_x_end = test_x_end[:self.num_trajectories].unsqueeze(0).repeat(*repeats)
@@ -357,10 +389,16 @@ class СSBMTrainer:
             for test_x_start, test_x_end in trange:
                 if self.codec is not None:
                     encoded_test_x_end = self.codec.encode_to_cats(test_x_end)
-                    encoded_pred_x_start = self.models[fb].sample(encoded_test_x_end, self.prior)
+                    if hasattr(self.models[fb], "module"):
+                        encoded_pred_x_start = self.models[fb].module.sample(encoded_test_x_end, self.prior)
+                    else:
+                        encoded_pred_x_start = self.models[fb].sample(encoded_test_x_end, self.prior)
                     pred_x_start = self.codec.decode_to_image(encoded_pred_x_start)
                 else:
-                    pred_x_start = self.models[fb].sample(test_x_end, self.prior)
+                    if hasattr(self.models[fb], "module"):
+                        pred_x_start = self.models[fb].module.sample(test_x_end, self.prior)
+                    else:
+                        pred_x_start = self.models[fb].sample(test_x_end, self.prior)
 
                 if self.exp_type == 'quantized_images' or self.exp_type == 'images':
                     if self.exp_type == 'images':

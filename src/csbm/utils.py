@@ -330,7 +330,9 @@ def visualize_trajectory_toy(
     im = fig2img(fig)
 
     if exp_path is not None:
-        fig_path = os.path.join(exp_path, 'trajectories', f'trajectories_{fb}_{iteration}_step_{step}.png')
+        dir_trajectories = os.path.join(exp_path, 'trajectories')
+        os.makedirs(dir_trajectories, exist_ok=True)
+        fig_path = os.path.join(dir_trajectories, f'trajectories_{fb}_{iteration}_step_{step}.png')
         if not os.path.isfile(fig_path):
             im.save(fig_path)
     if tracker:
@@ -370,7 +372,9 @@ def visualize_trajectory_image(
     im = fig2img(fig)
 
     if exp_path is not None:
-        fig_path = os.path.join(exp_path, 'trajectories', f'trajectories_{fb}_{iteration}_step_{step}.png')
+        dir_trajectories = os.path.join(exp_path, 'trajectories')
+        os.makedirs(dir_trajectories, exist_ok=True)
+        fig_path = os.path.join(dir_trajectories, f'trajectories_{fb}_{iteration}_step_{step}.png')
         if not os.path.isfile(fig_path):
             im.save(fig_path)
     
